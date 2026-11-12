@@ -1,0 +1,228 @@
+name: Docker-Image bauen
+
+run-name: Docker ${{ forgejo.ref_name }} @ ${{ forgejo.sha }}
+
+'on':
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ forgejo.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: docker-build
+    timeout-minutes: 30
+    steps:
+      - name: Repository auschecken
+        uses: https://data.forgejo.org/actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Checkout-Status merken
+        run: echo "CHECKOUT_OK=true" >> "$FORGEJO_ENV"
+
+      - name: Image-Adresse aus Forgejo ableiten
+        run: |
+          set -euo pipefail
+          registry="${FORGEJO_SERVER_URL#*://}"
+          registry="${registry%%/*}"
+          repository=$(printf '%s' "$FORGEJO_REPOSITORY" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+          image="$registry/$repository"
+          {
+            printf 'REGISTRY=%s\n' "$registry"
+            printf 'IMAGE=%s\n' "$image"
+            printf 'HEUTE_IMAGE=%s:%s\n' "$image" "$FORGEJO_SHA"
+          } >> "$FORGEJO_ENV"
+
+      - name: Produktionsimage bauen
+        run: |
+          set -euo pipefail
+          docker build --pull --tag "$HEUTE_IMAGE" .
+          echo "BUILD_OK=true" >> "$FORGEJO_ENV"
+
+      - name: Image starten und Healthcheck prüfen
+        run: |
+          set -euo pipefail
+          container_id=$(docker run --detach --network none "$HEUTE_IMAGE")
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..20}; do
+            if docker exec "$container_id" bun -e '
+              const response = await fetch("http://127.0.0.1:3000/api/health", { signal: AbortSignal.timeout(2000) });
+              if (!response.ok || (await response.json()).status !== "ok") process.exit(1);
+            ' >/dev/null 2>&1; then
+              echo "HEALTH_OK=true" >> "$FORGEJO_ENV"
+              printf 'Image %s ist bereit.\n' "$HEUTE_IMAGE"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container_id"
+          exit 1
+
+      - name: In die Forgejo-Registry pushen
+        env:
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          export DOCKER_CONFIG="$(mktemp -d)"
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+
+          printf '%s' "$REGISTRY_TOKEN" \
+            | docker login "$REGISTRY" \
+                --username "$FORGEJO_REPOSITORY_OWNER" \
+                --password-stdin
+
+          docker push "$HEUTE_IMAGE"
+          echo "PUSH_SHA_OK=true" >> "$FORGEJO_ENV"
+
+          if [ "$FORGEJO_REF" = "refs/heads/main" ] || [[ "$FORGEJO_REF" == refs/tags/* ]]; then
+            docker tag "$HEUTE_IMAGE" "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+            echo "PUSH_LATEST_OK=true" >> "$FORGEJO_ENV"
+          fi
+
+          if [[ "$FORGEJO_REF" == refs/tags/* ]]; then
+            tag="${FORGEJO_REF#refs/tags/}"
+            docker tag "$HEUTE_IMAGE" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+            echo "PUSH_TAG_OK=true" >> "$FORGEJO_ENV"
+          fi
+
+          digest=$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' "$HEUTE_IMAGE")
+          [ -z "$digest" ] || echo "IMAGE_DIGEST=$digest" >> "$FORGEJO_ENV"
+
+      - name: Forgejo-Job-Zusammenfassung
+        if: always()
+        run: |
+          summary="${FORGEJO_STEP_SUMMARY:-${GITHUB_STEP_SUMMARY:-}}"
+          [ -n "$summary" ] || exit 0
+
+          if [ "${CHECKOUT_OK:-}" = "true" ]; then
+            checkout_status="success"
+          else
+            checkout_status="failed"
+          fi
+
+          if [ "$checkout_status" != "success" ]; then
+            build_status="skipped"
+          elif [ "${BUILD_OK:-}" = "true" ]; then
+            build_status="success"
+          else
+            build_status="failed"
+          fi
+
+          if [ "$build_status" != "success" ]; then
+            health_status="skipped"
+          elif [ "${HEALTH_OK:-}" = "true" ]; then
+            health_status="success"
+          else
+            health_status="failed"
+          fi
+
+          if [ "$health_status" != "success" ]; then
+            push_sha_status="skipped"
+          elif [ "${PUSH_SHA_OK:-}" = "true" ]; then
+            push_sha_status="success"
+          else
+            push_sha_status="failed"
+          fi
+
+          is_latest_ref=false
+          if [ "$FORGEJO_REF" = "refs/heads/main" ] || [[ "$FORGEJO_REF" == refs/tags/* ]]; then
+            is_latest_ref=true
+          fi
+
+          if [ "$is_latest_ref" = "true" ]; then
+            if [ "$push_sha_status" != "success" ]; then
+              push_latest_status="skipped"
+            elif [ "${PUSH_LATEST_OK:-}" = "true" ]; then
+              push_latest_status="success"
+            else
+              push_latest_status="failed"
+            fi
+          fi
+
+          is_tag_ref=false
+          if [[ "$FORGEJO_REF" == refs/tags/* ]]; then
+            is_tag_ref=true
+          fi
+
+          if [ "$is_tag_ref" = "true" ]; then
+            if [ "${push_latest_status:-skipped}" != "success" ]; then
+              push_tag_status="skipped"
+            elif [ "${PUSH_TAG_OK:-}" = "true" ]; then
+              push_tag_status="success"
+            else
+              push_tag_status="failed"
+            fi
+          fi
+
+          class_of() {
+            case "$1" in
+              success) echo "success" ;;
+              failed) echo "fail" ;;
+              *) echo "skip" ;;
+            esac
+          }
+
+          label_of() {
+            case "$1" in
+              success) echo "OK" ;;
+              failed) echo "FAIL" ;;
+              *) echo "SKIP" ;;
+            esac
+          }
+
+          {
+            printf '### Pipeline-Status\n\n'
+            printf '```mermaid\n'
+            printf 'flowchart LR\n'
+            printf '    T(Trigger):::trigger --> C(Checkout · %s):::%s\n' "$(label_of "$checkout_status")" "$(class_of "$checkout_status")"
+            printf '    C --> B(Build · %s):::%s\n' "$(label_of "$build_status")" "$(class_of "$build_status")"
+            printf '    B --> H(Healthcheck · %s):::%s\n' "$(label_of "$health_status")" "$(class_of "$health_status")"
+            printf '    H --> S(Push :sha · %s):::%s\n' "$(label_of "$push_sha_status")" "$(class_of "$push_sha_status")"
+
+            previous="S"
+            if [ "$is_latest_ref" = "true" ]; then
+              printf '    %s --> L(Push :latest · %s):::%s\n' "$previous" "$(label_of "$push_latest_status")" "$(class_of "$push_latest_status")"
+              previous="L"
+            fi
+
+            if [ "$is_tag_ref" = "true" ]; then
+              printf '    %s --> G(Push :git-tag · %s):::%s\n' "$previous" "$(label_of "$push_tag_status")" "$(class_of "$push_tag_status")"
+              previous="G"
+            fi
+
+            printf '    %s --> M(Job Summary):::summary\n\n' "$previous"
+            printf '    classDef trigger fill:#dbeafe,stroke:#2563eb,color:#1e3a8a\n'
+            printf '    classDef success fill:#dcfce7,stroke:#16a34a,color:#14532d\n'
+            printf '    classDef fail fill:#fee2e2,stroke:#dc2626,color:#7f1d1d\n'
+            printf '    classDef skip fill:#e5e7eb,stroke:#9ca3af,color:#4b5563\n'
+            printf '    classDef summary fill:#ede9fe,stroke:#7c3aed,color:#4c1d95\n'
+            printf '```\n\n'
+
+            printf '| Feld | Wert |\n'
+            printf '| --- | --- |\n'
+            printf '| Commit | `%s` |\n' "$FORGEJO_SHA"
+            printf '| Ref | `%s` |\n' "$FORGEJO_REF_NAME"
+            printf '| Registry | `%s` |\n' "$REGISTRY"
+            printf '| Image | `%s` |\n' "$HEUTE_IMAGE"
+            if [ "$is_latest_ref" = "true" ]; then
+              printf '| Zusätzlich | `%s:latest` |\n' "$IMAGE"
+            fi
+            if [ "$is_tag_ref" = "true" ]; then
+              printf '| Zusätzlich | `%s:%s` |\n' "$IMAGE" "${FORGEJO_REF#refs/tags/}"
+            fi
+            if [ -n "${IMAGE_DIGEST:-}" ]; then
+              printf '| Digest | `%s` |\n' "$IMAGE_DIGEST"
+            fi
+          } >> "$summary"

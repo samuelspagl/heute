@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "budget-implementer": {
+      "description": "Kleine, sicher eingegrenzte Softwareimplementierungen mit knapper Ergebniszusammenfassung",
+      "mode": "primary",
+      "model": "opencode/deepseek-v4.1-flash-free",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "bash": "ask",
+        "external_directory": "deny",
+        "webfetch": "deny",
+        "websearch": "deny"
+      },
+      "prompt": "Implementiere nur die konkret beauftragten Dateien. Erhalte bestehende lokale Aenderungen. Keine Secrets, Commits, Pushes, Deployments oder destruktiven Aktionen. Fasse Dateien, Tests und offene Risiken in maximal 12 Zeilen zusammen."
+    }
+  }
+}

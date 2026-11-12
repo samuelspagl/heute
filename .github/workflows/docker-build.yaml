@@ -1,0 +1,76 @@
+name: Docker image
+
+'on':
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Build production image and run checks
+        env:
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          docker build --pull --target checks --tag heute-checks .
+          docker build --build-arg SOURCE_URL="$SOURCE_URL" --tag heute:ci .
+      - name: Check container health without external network
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id=$(docker run --detach --network none heute:ci)
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if docker exec "$container_id" bun -e '
+              const response = await fetch("http://127.0.0.1:3000/api/health", { signal: AbortSignal.timeout(2000) });
+              if (!response.ok || (await response.json()).status !== "ok") process.exit(1);
+            ' >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container_id"
+          exit 1
+      - name: Publish checked image to GHCR
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          GIT_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${REPOSITORY,,}"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USER" --password-stdin
+          docker tag heute:ci "$image:$COMMIT_SHA"
+          docker push "$image:$COMMIT_SHA"
+          if [[ "$GIT_REF" == refs/heads/main ]]; then
+            tag=latest
+          else
+            tag="${GIT_REF#refs/tags/}"
+          fi
+          docker tag heute:ci "$image:$tag"
+          docker push "$image:$tag"
+          printf '### Published image\n\n- `%s:%s`\n- `%s:%s`\n' \
+            "$image" "$COMMIT_SHA" "$image" "$tag" >> "$GITHUB_STEP_SUMMARY"

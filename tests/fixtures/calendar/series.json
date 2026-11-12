@@ -1,0 +1,16 @@
+[
+  {
+    "summary": "Schwimmtraining",
+    "start": { "dateTime": "2026-11-16T16:00:00+01:00" },
+    "end": { "dateTime": "2026-11-16T17:00:00+01:00" },
+    "uid": "series-swim",
+    "recurrence_id": "2026-11-16T16:00:00+01:00"
+  },
+  {
+    "summary": "Schwimmtraining",
+    "start": { "dateTime": "2026-11-23T16:00:00+01:00" },
+    "end": { "dateTime": "2026-11-23T17:00:00+01:00" },
+    "uid": "series-swim",
+    "recurrence_id": "2026-11-23T16:00:00+01:00"
+  }
+]

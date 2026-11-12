@@ -1,0 +1,16 @@
+[
+  {
+    "summary": "Abendessen",
+    "start": { "dateTime": "2026-11-11T18:30:00+01:00" },
+    "end": { "dateTime": "2026-11-11T20:00:00+01:00" },
+    "uid": "family-dinner",
+    "description": "Gemeinsam kochen",
+    "location": "Küche"
+  },
+  {
+    "summary": "Geburtstag Oma",
+    "start": { "date": "2026-11-14" },
+    "end": { "date": "2026-11-15" },
+    "uid": "family-birthday"
+  }
+]

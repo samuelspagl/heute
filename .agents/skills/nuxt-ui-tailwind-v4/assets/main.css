@@ -1,0 +1,31 @@
+/* Target: app/assets/css/main.css — Tailwind v4 and Nuxt UI v4 */
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@theme static {
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-300: #93c5fd;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e40af;
+  --color-brand-900: #1e3a8a;
+  --color-brand-950: #172554;
+}
+
+:root {
+  --ui-radius: 0.625rem;
+}
+
+.dark {
+  /* Override sparingly; Nuxt UI supplies dark tokens by default. */
+  --ui-bg: var(--ui-color-neutral-950);
+}
+
+/* Keep a visible keyboard focus treatment; don't override it blindly. */
+@media (prefers-reduced-motion: reduce) {
+  .app-decorative-motion { animation: none !important; transition: none !important; }
+}

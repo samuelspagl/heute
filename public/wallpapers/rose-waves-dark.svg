@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="wave" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#533448"/>
+      <stop offset="1" stop-color="#71405d"/>
+    </linearGradient>
+  </defs>
+  <path fill="#2b2031" d="M0 0h1600v1000H0z"/>
+  <style>
+    .drift path { transform-origin: center; }
+    @media (prefers-reduced-motion: no-preference) {
+      .drift path { animation: wave-drift 22s ease-in-out infinite alternate; }
+      .drift path:nth-child(even) { animation-direction: alternate-reverse; animation-duration: 28s; }
+      .drift path:nth-child(3) { animation-duration: 32s; }
+    }
+    @keyframes wave-drift {
+      from { transform: translate(-1%, -0.8%) scale(1.06); }
+      to { transform: translate(1%, 0.8%) scale(1.06); }
+    }
+  </style>
+  <g class="drift">
+    <path fill="#5b3049" d="M0 376C123 6 319-98 507 43c155 116 124 298 345 305 229 8 373-318 748-201v853H0Z"/>
+    <path fill="url(#wave)" d="M0 254c324 148 558 150 824 39C1110 174 1301 45 1600 93v907H0Z"/>
+    <path fill="#5b3049" opacity=".62" d="M0 433c456 109 703 238 1095 140 214-54 353-146 505-143v570H0Z"/>
+    <path fill="#44406d" d="M0 899c296 45 347-158 577-169 246-12 281 169 511 147 197-19 289-225 512-266v389H0Z"/>
+  </g>
+</svg>

@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.nuxt/
+.output/
+node_modules/
+data/
+.data/
+/media/
+.licenses/
+.local-unlicensed-assets/
